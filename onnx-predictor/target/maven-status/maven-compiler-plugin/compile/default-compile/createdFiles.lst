@@ -1,0 +1,3 @@
+com/example/onnx/OnnxPredictor.class
+com/example/onnx/ModelRunner.class
+com/example/onnx/InferenceResult.class

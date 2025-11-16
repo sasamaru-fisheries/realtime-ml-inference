@@ -9,20 +9,17 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
-from nyoka import skl_to_pmml
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.impute import SimpleImputer
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType, StringTensorType
+from nyoka import skl_to_pmml
 
-FEATURE_COLUMNS = [
-    "Pclass",
-    "Sex",
-    "Age",
-    "SibSp",
-    "Parch",
-    "Fare",
-    "Embarked",
-]
+NUMERIC_COLUMNS = ["Pclass", "Age", "SibSp", "Parch", "Fare"]
+CATEGORICAL_COLUMNS = ["Sex", "Embarked"]
+FEATURE_COLUMNS = [*NUMERIC_COLUMNS, *CATEGORICAL_COLUMNS]
 
 SEX_MAP = {"male": 1.0, "female": 0.0}
 EMBARKED_MAP = {"S": 0.0, "C": 1.0, "Q": 2.0}
@@ -58,18 +55,8 @@ def load_and_preprocess(csv_path: str) -> tuple[np.ndarray, np.ndarray]:
     df = pd.read_csv(csv_path)
     df = df[["Survived", *FEATURE_COLUMNS]].copy()
 
-    df["Sex"] = (
-        df["Sex"].str.lower().map(SEX_MAP)
-    )
-    df["Embarked"] = df["Embarked"].map(EMBARKED_MAP)
-
-    # 欠損値を埋める（代入式にしてチェーン警告を回避）
-    df["Sex"] = df["Sex"].fillna(0.0)
-    df["Embarked"] = df["Embarked"].fillna(df["Embarked"].mode(dropna=True)[0])
-    for col in ["Age", "Fare"]:
-        df[col] = df[col].fillna(df[col].median())
-
-    X = df[FEATURE_COLUMNS].astype(np.float32).to_numpy()
+    # パイプラインに前処理を組み込むため、ここでは特徴とラベルを切り出すのみ
+    X = df[FEATURE_COLUMNS]
     y = df["Survived"].astype(np.int64).to_numpy()
     return X, y
 
@@ -78,8 +65,31 @@ def train_model(X: np.ndarray, y: np.ndarray, n_estimators: int) -> RandomForest
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    clf = RandomForestClassifier(
-        n_estimators=n_estimators, random_state=42, n_jobs=-1
+    numeric_pipeline = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+        ]
+    )
+    categorical_pipeline = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_pipeline, NUMERIC_COLUMNS),
+            ("cat", categorical_pipeline, CATEGORICAL_COLUMNS),
+        ]
+    )
+
+    clf = Pipeline(
+        steps=[
+            ("preprocess", preprocessor),
+            ("model", RandomForestClassifier(
+                n_estimators=n_estimators, random_state=42, n_jobs=-1
+            )),
+        ]
     )
     clf.fit(X_train, y_train)
     preds = clf.predict(X_test)
@@ -90,7 +100,11 @@ def train_model(X: np.ndarray, y: np.ndarray, n_estimators: int) -> RandomForest
 
 def export_onnx(model: RandomForestClassifier, feature_count: int, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    initial_type = [("float_input", FloatTensorType([None, feature_count]))]
+    initial_type = []
+    for col in NUMERIC_COLUMNS:
+        initial_type.append((col, FloatTensorType([None, 1])))
+    for col in CATEGORICAL_COLUMNS:
+        initial_type.append((col, StringTensorType([None, 1])))
     options = {"zipmap": False}  # 出力をTensor形式にする
     onnx_model = convert_sklearn(model, initial_types=initial_type, options=options)
     output_path.write_bytes(onnx_model.SerializeToString())

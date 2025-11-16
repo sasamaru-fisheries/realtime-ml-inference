@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
 import java.util.Optional;
+import java.util.HashMap;
 
 /**
  * インスタンス化時にONNXモデルを読み込み、推論とリロード機能を提供する軽量ラッパー。
@@ -90,6 +91,51 @@ public class OnnxPredictor implements Closeable {
             long duration = System.nanoTime() - start;
             return new InferenceResult(output, duration);
         }
+    }
+
+    /**
+     * 複数入力（列ごとのTensorなど）を受け取って推論を実行する。
+     * 値は float[] または String[] を想定しており、内部でOnnxTensorに変換する。
+     */
+    public synchronized InferenceResult runInference(Map<String, Object> inputs,
+                                                     String outputName) throws OrtException {
+        if (session == null) {
+            throw new IllegalStateException("ONNX session is not initialized");
+        }
+        Map<String, OnnxTensor> tensorMap = new HashMap<>();
+        long start = System.nanoTime();
+        try {
+            for (Map.Entry<String, Object> entry : inputs.entrySet()) {
+                tensorMap.put(entry.getKey(), createTensor(entry.getValue()));
+            }
+            try (OrtSession.Result result = session.run(tensorMap)) {
+                OnnxValue outputValue = result.get(outputName).orElseThrow(
+                        () -> new IllegalStateException("Output '" + outputName + "' not found in inference result")
+                );
+                if (!(outputValue instanceof OnnxTensor tensor)) {
+                    throw new IllegalStateException("Expected tensor output but received: " + outputValue.getClass());
+                }
+                float[] output = toFloatArray(tensor);
+                long duration = System.nanoTime() - start;
+                return new InferenceResult(output, duration);
+            }
+        } finally {
+            for (OnnxTensor tensor : tensorMap.values()) {
+                if (tensor != null) {
+                    tensor.close();
+                }
+            }
+        }
+    }
+
+    private OnnxTensor createTensor(Object value) throws OrtException {
+        if (value instanceof float[] floats) {
+            return OnnxTensor.createTensor(environment, FloatBuffer.wrap(floats), new long[]{floats.length});
+        }
+        if (value instanceof String[] strings) {
+            return OnnxTensor.createTensor(environment, strings);
+        }
+        throw new IllegalArgumentException("Unsupported input type: " + value.getClass());
     }
 
     private float[] toFloatArray(OnnxTensor tensor) throws OrtException {

@@ -9,6 +9,14 @@ import java.util.Arrays;
  * {@link OnnxPredictor} をCLIから手軽に試すためのエントリーポイント。
  */
 public final class ModelRunner {
+    private static final java.util.Set<String> NUMERIC_COLUMNS_LOWER =
+            java.util.Set.of("pclass", "age", "sibsp", "parch", "fare");
+    private static final java.util.Set<String> CATEGORICAL_COLUMNS_LOWER =
+            java.util.Set.of("sex", "embarked");
+    private static final java.util.Map<String, Float> SEX_MAP =
+            java.util.Map.of("male", 1.0f, "female", 0.0f);
+    private static final java.util.Map<String, Float> EMBARKED_MAP =
+            java.util.Map.of("s", 0.0f, "c", 1.0f, "q", 2.0f);
 
     public static void main(String[] args) {
         // 引数が足りない場合は使い方を表示して終了
@@ -19,14 +27,15 @@ public final class ModelRunner {
         String modelPath = args[0];
         String inputName = args[1];
         String outputName = args[2];
-        // CSVモードの場合は --csv <csv-path> <columns>
+        // CSVモードの場合は --csv <csv-path> <columns> [output-csv]
         if ("--csv".equals(args[3])) {
             if (args.length < 6) {
                 printUsageAndExit();
             }
             String csvPath = args[4];
             String[] columns = args[5].split(",");
-            runCsvMode(modelPath, inputName, outputName, csvPath, columns);
+            String outputCsv = args.length >= 7 ? args[6] : null;
+            runCsvMode(modelPath, inputName, outputName, csvPath, columns, outputCsv);
             return;
         }
 
@@ -72,7 +81,8 @@ public final class ModelRunner {
                                    String inputName,
                                    String outputName,
                                    String csvPath,
-                                   String[] columns) {
+                                   String[] columns,
+                                   String outputCsv) {
         try (OnnxPredictor predictor = new OnnxPredictor(modelPath)) {
             java.nio.file.Path path = java.nio.file.Path.of(csvPath);
             java.util.List<String> lines = java.nio.file.Files.readAllLines(path);
@@ -81,13 +91,17 @@ public final class ModelRunner {
                 return;
             }
 
-            // ヘッダー行から列名→インデックスのマップを作る
+            // ヘッダー行から列名→インデックスのマップを作る（小文字化して一致判定を緩める）
             String[] headers = lines.get(0).split(",");
             java.util.Map<String, Integer> indexByName = new java.util.HashMap<>();
             for (int i = 0; i < headers.length; i++) {
-                indexByName.put(headers[i].trim(), i);
+                indexByName.put(headers[i].trim().toLowerCase(), i);
             }
 
+            int batch = lines.size() - 1;
+            int row = 0;
+            java.util.List<String> outputLines = new java.util.ArrayList<>();
+            int classes = -1;
             for (int lineIdx = 1; lineIdx < lines.size(); lineIdx++) {
                 String line = lines.get(lineIdx);
                 if (line.isBlank()) {
@@ -96,21 +110,70 @@ public final class ModelRunner {
                 String[] parts = line.split(",");
                 float[] values = new float[columns.length];
                 for (int c = 0; c < columns.length; c++) {
-                    Integer idx = indexByName.get(columns[c].trim());
+                    String trimmed = columns[c].trim();
+                    String key = trimmed.toLowerCase();
+                    Integer idx = indexByName.get(key);
                     if (idx == null || idx >= parts.length) {
-                        throw new IllegalArgumentException("列 " + columns[c] + " がCSVに見つかりません");
+                        throw new IllegalArgumentException("列 " + trimmed + " がCSVに見つかりません");
                     }
-                    values[c] = Float.parseFloat(parts[idx].trim());
+                    String raw = parts[idx].trim();
+                    if (CATEGORICAL_COLUMNS_LOWER.contains(key)) {
+                        values[c] = mapCategory(key, raw);
+                    } else if (NUMERIC_COLUMNS_LOWER.contains(key)) {
+                        values[c] = parseFloatSafe(raw);
+                    } else {
+                        throw new IllegalArgumentException("列 " + trimmed + " の型が判定できません（数値かカテゴリか指定してください）");
+                    }
                 }
-                long[] shape = new long[]{1, values.length};
-                InferenceResult result = predictor.runInference(inputName, values, shape, outputName);
-                System.out.println("Row " + lineIdx + " -> " + java.util.Arrays.toString(result.output())
+                InferenceResult result = predictor.runInference(inputName, values, new long[]{1, values.length}, outputName);
+                System.out.println("Row " + (lineIdx) + " -> " + java.util.Arrays.toString(result.output())
                         + " | time: " + String.format("%.3f ms", result.elapsedMillis()));
+                if (classes == -1) {
+                    classes = result.output().length;
+                    StringBuilder header = new StringBuilder("row");
+                    for (int c = 0; c < classes; c++) {
+                        header.append(",prob_").append(c);
+                    }
+                    outputLines.add(header.toString());
+                }
+                StringBuilder lineOut = new StringBuilder();
+                lineOut.append(lineIdx);
+                float[] preds = result.output();
+                for (float p : preds) {
+                    lineOut.append(",").append(p);
+                }
+                outputLines.add(lineOut.toString());
+                row++;
+            }
+            if (outputCsv != null && !outputLines.isEmpty()) {
+                java.nio.file.Path outPath = java.nio.file.Path.of(outputCsv);
+                java.nio.file.Files.createDirectories(outPath.getParent() == null ? java.nio.file.Path.of(".") : outPath.getParent());
+                java.nio.file.Files.write(outPath, outputLines);
+                System.out.println("Saved predictions to " + outPath.toAbsolutePath());
             }
         } catch (Exception ex) {
             System.err.println("Failed to run CSV inference: " + ex.getMessage());
             ex.printStackTrace(System.err);
             System.exit(2);
+        }
+    }
+
+    private static float mapCategory(String key, String raw) {
+        String lower = raw.toLowerCase();
+        if ("sex".equals(key)) {
+            return SEX_MAP.getOrDefault(lower, 0f);
+        }
+        if ("embarked".equals(key)) {
+            return EMBARKED_MAP.getOrDefault(lower, 0f);
+        }
+        return 0f;
+    }
+
+    private static float parseFloatSafe(String raw) {
+        try {
+            return Float.parseFloat(raw);
+        } catch (NumberFormatException ex) {
+            return 0f;
         }
     }
 
@@ -120,10 +183,12 @@ public final class ModelRunner {
                   1) 単一サンプル:
                      ModelRunner <model-path> <input-name> <output-name> <カンマ区切りの値> [shape]
                        例) ModelRunner model.onnx float_input probabilities 3,1,29,0,0,7.25,0 1,7
+                       （※ 前処理込みONNXでは列ごとの入力を推奨、CSVモード推奨）
 
                   2) CSV一括推論:
-                     ModelRunner <model-path> <input-name> <output-name> --csv <csv-path> <columns>
+                     ModelRunner <model-path> <input-name> <output-name> --csv <csv-path> <columns> [output-csv]
                        columns: CSVから読み出す列名をカンマ区切りで順序付きに指定 (例: Pclass,Sex,Age,SibSp,Parch,Fare,Embarked)
+                       output-csv: 指定すると推論結果をCSVに保存
                        例) ModelRunner model.onnx float_input probabilities --csv data.csv Pclass,Sex,Age,SibSp,Parch,Fare,Embarked
                 """);
         System.exit(1);
