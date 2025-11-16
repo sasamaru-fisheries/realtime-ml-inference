@@ -1,0 +1,3 @@
+com/example/pmml/InferenceResult.class
+com/example/pmml/ModelRunner.class
+com/example/pmml/PmmlPredictor.class
