@@ -130,10 +130,10 @@ public class OnnxPredictor implements Closeable {
 
     private OnnxTensor createTensor(Object value) throws OrtException {
         if (value instanceof float[] floats) {
-            return OnnxTensor.createTensor(environment, FloatBuffer.wrap(floats), new long[]{floats.length});
+            return OnnxTensor.createTensor(environment, FloatBuffer.wrap(floats), new long[]{floats.length, 1});
         }
         if (value instanceof String[] strings) {
-            return OnnxTensor.createTensor(environment, strings);
+            return OnnxTensor.createTensor(environment, strings, new long[]{strings.length, 1});
         }
         throw new IllegalArgumentException("Unsupported input type: " + value.getClass());
     }

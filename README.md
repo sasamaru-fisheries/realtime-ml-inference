@@ -7,7 +7,7 @@
 事前に必要パッケージをインストールします。
 
 ```bash
-pip install pandas numpy scikit-learn skl2onnx onnx nyoka
+pip install pandas numpy scikit-learn skl2onnx onnx sklearn2pmml pyyaml
 ```
 
 TitanicのCSV（`data/Titanic-Dataset.csv`）を使って学習＋ONNX/PMMLエクスポート:
@@ -15,11 +15,19 @@ TitanicのCSV（`data/Titanic-Dataset.csv`）を使って学習＋ONNX/PMMLエ�
 ```bash
 python train_random_forest.py \
   --csv data/Titanic-Dataset.csv \
-  --output models/titanic_random_forest.onnx \
+  --onnx models/titanic_random_forest.onnx \
   --pmml models/titanic_random_forest.pmml
 ```
 
-実行が成功すると `models/titanic_random_forest.onnx` と `models/titanic_random_forest.pmml` が生成され、標準出力に特徴量の並び順が表示されます（`Pclass, Sex, Age, SibSp, Parch, Fare, Embarked`）。この順番で数値を並べて推論用の入力を作成してください。
+スキーマをカスタムしたい場合は、CSVを参照して推定したテンプレートを出力し、必要な列だけ上書きしてください:
+
+```bash
+uv run python generate_schema.py --csv data/Titanic-Dataset.csv --target Survived --output schema.yaml
+# schema.yaml を編集したのち
+uv run python train_random_forest.py --csv data/Titanic-Dataset.csv --schema schema.yaml --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
+```
+
+実行が成功すると `models/titanic_random_forest.onnx` と `models/titanic_random_forest.pmml` が生成され、標準出力に特徴量の並び順が表示されます。
 
 ### 2. Javaプロジェクトのビルド
 
@@ -30,25 +38,29 @@ mvn package
 
 成功すると通常のJARに加えて依存込みの `target/onnx-predictor-1.0.0-SNAPSHOT-shaded.jar` が生成されます。以降はこのshaded JARを使うと依存クラスパスを個別指定する必要がありません。
 
-### 3. Javaで推論を実行
+### 3. Javaで推論を実行（前処理はモデル側）
 
-`ModelRunner` の引数には「モデルパス」「入力テンソル名」「出力テンソル名」「入力データ」を渡します。今回の学習スクリプトでは前処理を含んだPipelineをそのままONNX化しているため、CSV経由で列名付きデータを渡すモードを推奨します（`Sex`/`Embarked` が文字列のままでも内部でOneHotEncodeされます）。
+`ModelRunner` はスキーマYAMLを読み、CSVを列名付きでモデルに渡します（OneHot/ImputerはONNX内に含まれています）。
 
-#### CSVを使った一括推論
-
-CSVから特徴量を読み込んで複数行まとめて推論する場合:
+#### ONNX: CSV一括推論
 
 ```bash
-java -jar target/onnx-predictor-1.0.0-SNAPSHOT-shaded.jar \
-    ../models/titanic_random_forest.onnx \
-    float_input \
-    output_probability \
-    --csv data/Titanic-Dataset.csv \
-    Pclass,Sex,Age,SibSp,Parch,Fare,Embarked
+java -jar target/onnx-predictor-1.0.0.jar \
+  ../models/titanic_random_forest.onnx \
+  probabilities \
+  --csv ../data/Titanic-Dataset.csv \
+  ../schema.yaml \
+  ../models/predictions.csv
 ```
 
-- `--csv` の後にCSVパス、その後にモデルが期待する列名をカンマ区切りで順序指定します。
-- 各行について推論結果と推論時間が表示されます。
+- `probabilities` はONNXの出力名（モデルに合わせて変更可）。
+- `schema.yaml` は numeric/categorical 列を定義したYAML（`generate_schema.py` で作成）。列名はONNX出力時のスキーマと一致させてください。
+- 最後の引数（出力CSV）は省略可。指定しない場合は標準出力のみ。
+
+### データセットを変えたときに直す場所
+- ONNX推論: 列名やカテゴリ列を変えたら `schema.yaml` を新データに合わせて更新し、モデルを再生成してください。推論時は `ModelRunner <model.onnx> <output-name> --csv <csv> <schema.yaml> [out.csv]` を使います。
+- PMML推論: 同様に `schema.yaml` を更新し、PMMLを新データで再生成してください。PMMLの `ModelRunner` は列指定を新スキーマに合わせます。
+- Python側: 新しいデータ用に `train_random_forest.py` を実行し、ONNX/PMMLを再出力。スキーマを使う場合は `schema.yaml` を更新してください。
 
 ## PMML Predictor
 
@@ -65,15 +77,17 @@ mvn package
 
 ### 推論の実行例
 
-Titanicモデル（pmml）を使って推論する場合の例です。入力値の順序は `Pclass, Sex, Age, SibSp, Parch, Fare, Embarked` です。
+PMMLモデルを使って推論する例です。列定義はスキーマYAMLに従います。
 
 ```bash
 java -jar target/pmml-predictor-1.0.0.jar \
-    ../models/titanic_random_forest.pmml \
-    3,1,29,0,0,7.25,0 \
-    Survived
+  ../models/titanic_random_forest.pmml \
+  --csv ../data/Titanic-Dataset.csv \
+  ../schema.yaml \
+  ../models/pmml_predictions.csv
+
 ```
 
-- 2番目の引数はカンマ区切りの入力値です。
-- 3番目の引数は予測ターゲットのフィールド名です（Titanicでは `Survived`）。
-- 実行結果として予測ラベルと確率分布、推論時間が表示されます。
+- `--csv` の後にCSVパス、その次にスキーマYAMLへのパスを指定します（学習時と同じもの）。
+- 最後の引数（出力CSV）は省略可。指定しない場合は標準出力のみ。
+- 実行結果として確率と推論時間が表示され、CSV出力にも推論時間が含まれます。
