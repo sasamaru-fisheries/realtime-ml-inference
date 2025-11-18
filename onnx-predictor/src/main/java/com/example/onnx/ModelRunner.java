@@ -19,14 +19,19 @@ import java.util.*;
 public final class ModelRunner {
 
     public static void main(String[] args) {
-        if (args.length < 4 || !"--csv".equals(args[2])) {
+        if (args.length < 3) {
             printUsageAndExit();
         }
         String modelPath = args[0];
-        // 出力名省略時は probabilities をデフォルトにする
-        String outputName = args[1].startsWith("--") ? "probabilities" : args[1];
-        int csvArgIndex = args[1].startsWith("--") ? 1 : 2;
-        if (!"--csv".equals(args[csvArgIndex])) {
+        String outputName = "probabilities";
+        int csvArgIndex;
+        if ("--csv".equals(args[1])) {
+            csvArgIndex = 1; // 出力名省略
+        } else {
+            outputName = args[1];
+            csvArgIndex = 2;
+        }
+        if (args.length < csvArgIndex + 3 || !"--csv".equals(args[csvArgIndex])) {
             printUsageAndExit();
         }
         String csvPath = args[csvArgIndex + 1];
@@ -142,7 +147,7 @@ public final class ModelRunner {
                        output-csv: 指定すると推論結果をCSVに保存
                        例) ModelRunner model.onnx probabilities --csv data.csv schema.yaml preds.csv
                            ModelRunner model.onnx --csv data.csv schema.yaml
-        """);
+                """);
         System.exit(1);
     }
 
