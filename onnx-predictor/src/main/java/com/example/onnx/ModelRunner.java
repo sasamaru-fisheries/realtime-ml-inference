@@ -19,14 +19,19 @@ import java.util.*;
 public final class ModelRunner {
 
     public static void main(String[] args) {
-        if (args.length < 5 || !"--csv".equals(args[2])) {
+        if (args.length < 4 || !"--csv".equals(args[2])) {
             printUsageAndExit();
         }
         String modelPath = args[0];
-        String outputName = args[1];
-        String csvPath = args[3];
-        String schemaPath = args[4];
-        String outputCsv = args.length >= 6 ? args[5] : null;
+        // 出力名省略時は probabilities をデフォルトにする
+        String outputName = args[1].startsWith("--") ? "probabilities" : args[1];
+        int csvArgIndex = args[1].startsWith("--") ? 1 : 2;
+        if (!"--csv".equals(args[csvArgIndex])) {
+            printUsageAndExit();
+        }
+        String csvPath = args[csvArgIndex + 1];
+        String schemaPath = args[csvArgIndex + 2];
+        String outputCsv = args.length > csvArgIndex + 3 ? args[csvArgIndex + 3] : null;
 
         runCsvMode(modelPath, outputName, csvPath, schemaPath, outputCsv);
     }
@@ -55,8 +60,7 @@ public final class ModelRunner {
 
             String[] columns = schema.columns();
             List<String> outputLines = new ArrayList<>();
-            // ヘッダー: rowと各クラス確率に加え、time_ms/time_nsを出力
-            outputLines.add("row" + buildHeader(schema.columns().length) + ",time_ms,time_ns");
+            boolean headerWritten = false;
             int row = 0;
             for (int lineIdx = 1; lineIdx < lines.size(); lineIdx++) {
                 String line = lines.get(lineIdx);
@@ -77,6 +81,11 @@ public final class ModelRunner {
                 }
                 InferenceResult result = predictor.runInference(inputMap, outputName);
                 float[] out = result.output();
+                // ヘッダーは最初の推論結果長に合わせて決定
+                if (!headerWritten) {
+                    outputLines.add("row" + buildHeader(out.length) + ",time_ms,time_ns");
+                    headerWritten = true;
+                }
                 System.out.printf("Row %d -> %s | time: %.3f ms (%d ns)%n",
                         lineIdx, Arrays.toString(out), result.elapsedMillis(), result.elapsedNanos());
                 outputLines.add(buildLine(lineIdx, out, result));
@@ -127,11 +136,13 @@ public final class ModelRunner {
         System.err.println("""
                 使い方:
                   CSV一括推論（前処理はモデルに任せる）:
-                     ModelRunner <model.onnx> <output-name> --csv <csv-path> <schema.yaml> [output-csv]
+                     ModelRunner <model.onnx> [output-name] --csv <csv-path> <schema.yaml> [output-csv]
+                       output-name: 省略時は probabilities を使用
                        schema.yaml: numeric/categorical の列名を持つYAML（train側と合わせる）
                        output-csv: 指定すると推論結果をCSVに保存
                        例) ModelRunner model.onnx probabilities --csv data.csv schema.yaml preds.csv
-                """);
+                           ModelRunner model.onnx --csv data.csv schema.yaml
+        """);
         System.exit(1);
     }
 

@@ -13,18 +13,15 @@ pip install pandas numpy scikit-learn skl2onnx onnx sklearn2pmml pyyaml
 TitanicのCSV（`data/Titanic-Dataset.csv`）を使って学習＋ONNX/PMMLエクスポート:
 
 ```bash
-python train_random_forest.py \
-  --csv data/Titanic-Dataset.csv \
-  --onnx models/titanic_random_forest.onnx \
-  --pmml models/titanic_random_forest.pmml
+uv run src/train_random_forest.py --csv data/Titanic-Dataset.csv --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
 ```
 
 スキーマをカスタムしたい場合は、CSVを参照して推定したテンプレートを出力し、必要な列だけ上書きしてください:
 
 ```bash
-uv run python generate_schema.py --csv data/Titanic-Dataset.csv --target Survived --output schema.yaml
-# schema.yaml を編集したのち
-uv run python train_random_forest.py --csv data/Titanic-Dataset.csv --schema schema.yaml --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
+uv run python src/generate_schema.py --csv data/Titanic-Dataset.csv --target Survived --output schema.yaml
+# schema.yaml を編集したのち（--schema は必須）
+uv run python src/train_random_forest.py --csv data/Titanic-Dataset.csv --schema schema.yaml --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
 ```
 
 実行が成功すると `models/titanic_random_forest.onnx` と `models/titanic_random_forest.pmml` が生成され、標準出力に特徴量の並び順が表示されます。
@@ -45,12 +42,7 @@ mvn package
 #### ONNX: CSV一括推論
 
 ```bash
-java -jar target/onnx-predictor-1.0.0.jar \
-  ../models/titanic_random_forest.onnx \
-  probabilities \
-  --csv ../data/Titanic-Dataset.csv \
-  ../schema.yaml \
-  ../models/predictions.csv
+java -jar target/onnx-predictor-1.0.0.jar ../models/titanic_random_forest.onnx probabilities --csv ../data/Titanic-Dataset.csv ../schema.yaml ../models/onnx_predictions.csv
 ```
 
 - `probabilities` はONNXの出力名（モデルに合わせて変更可）。
@@ -59,7 +51,7 @@ java -jar target/onnx-predictor-1.0.0.jar \
 
 ### データセットを変えたときに直す場所
 - ONNX推論: 列名やカテゴリ列を変えたら `schema.yaml` を新データに合わせて更新し、モデルを再生成してください。推論時は `ModelRunner <model.onnx> <output-name> --csv <csv> <schema.yaml> [out.csv]` を使います。
-- PMML推論: 同様に `schema.yaml` を更新し、PMMLを新データで再生成してください。PMMLの `ModelRunner` は列指定を新スキーマに合わせます。
+- PMML推論: 同様に `schema.yaml` を更新し、PMMLを新データで再生成してください。PMMLの `ModelRunner` は `--csv <csv> <schema.yaml>` を期待します。
 - Python側: 新しいデータ用に `train_random_forest.py` を実行し、ONNX/PMMLを再出力。スキーマを使う場合は `schema.yaml` を更新してください。
 
 ## PMML Predictor
@@ -80,12 +72,7 @@ mvn package
 PMMLモデルを使って推論する例です。列定義はスキーマYAMLに従います。
 
 ```bash
-java -jar target/pmml-predictor-1.0.0.jar \
-  ../models/titanic_random_forest.pmml \
-  --csv ../data/Titanic-Dataset.csv \
-  ../schema.yaml \
-  ../models/pmml_predictions.csv
-
+java -jar target/pmml-predictor-1.0.0.jar ../models/titanic_random_forest.pmml --csv ../data/Titanic-Dataset.csv ../schema.yaml ../models/pmml_predictions.csv
 ```
 
 - `--csv` の後にCSVパス、その次にスキーマYAMLへのパスを指定します（学習時と同じもの）。

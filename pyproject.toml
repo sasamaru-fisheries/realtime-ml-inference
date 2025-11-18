@@ -13,4 +13,5 @@ dependencies = [
     "packaging>=25.0",
     "sklearn2pmml",
     "pyyaml",
+    "seaborn>=0.13.2",
 ]
