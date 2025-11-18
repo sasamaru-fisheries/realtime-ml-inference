@@ -13,15 +13,9 @@ pip install pandas numpy scikit-learn skl2onnx onnx sklearn2pmml pyyaml
 TitanicのCSV（`data/Titanic-Dataset.csv`）を使って学習＋ONNX/PMMLエクスポート:
 
 ```bash
-uv run src/train_random_forest.py --csv data/Titanic-Dataset.csv --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
-```
-
-スキーマをカスタムしたい場合は、CSVを参照して推定したテンプレートを出力し、必要な列だけ上書きしてください:
-
-```bash
-uv run python src/generate_schema.py --csv data/Titanic-Dataset.csv --target Survived --output schema.yaml
+uv run python src/generate_schema.py --csv data/Titanic-Dataset.csv --target Survived --output schema_titanic.yaml
 # schema.yaml を編集したのち（--schema は必須）
-uv run python src/train_random_forest.py --csv data/Titanic-Dataset.csv --schema schema.yaml --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
+uv run python src/train_random_forest.py --csv data/Titanic-Dataset.csv --schema schema_titanic.yaml --onnx models/titanic_random_forest.onnx --pmml models/titanic_random_forest.pmml
 ```
 
 実行が成功すると `models/titanic_random_forest.onnx` と `models/titanic_random_forest.pmml` が生成され、標準出力に特徴量の並び順が表示されます。
@@ -40,9 +34,25 @@ mvn package
 `ModelRunner` はスキーマYAMLを読み、CSVを列名付きでモデルに渡します（OneHot/ImputerはONNX内に含まれています）。
 
 #### ONNX: CSV一括推論
+#### ONNX: 1行で初期化→推論（schema付き）
 
 ```bash
-java -jar target/onnx-predictor-1.0.0.jar ../models/titanic_random_forest.onnx probabilities --csv ../data/Titanic-Dataset.csv ../schema.yaml ../models/onnx_predictions.csv
+java -cp target/onnx-predictor-1.0.0.jar com.example.onnx.SampleUsage \
+  ../models/titanic_random_forest.onnx probabilities ../schema_titanic.yaml ../data/Titanic-Dataset.csv 1
+```
+
+#### ONNX: 別モデルに差し替えて再度推論
+
+```bash
+java -cp target/onnx-predictor-1.0.0.jar com.example.onnx.SampleUsage \
+  ../models/titanic_random_forest_v2.onnx probabilities ../schema_titanic.yaml ../data/Titanic-Dataset.csv 1
+```
+
+(同じモデルを再ロードする場合はモデルパスを同じにし、Schema/CSVは共通のままでOKです。)
+
+
+```bash
+java -jar target/onnx-predictor-1.0.0.jar ../models/titanic_random_forest.onnx probabilities --csv ../data/Titanic-Dataset.csv ../schema_titanic.yaml ../models/titanic_onnx_predictions.csv
 ```
 
 - `probabilities` はONNXの出力名（モデルに合わせて変更可）。
@@ -50,8 +60,8 @@ java -jar target/onnx-predictor-1.0.0.jar ../models/titanic_random_forest.onnx p
 - 最後の引数（出力CSV）は省略可。指定しない場合は標準出力のみ。
 
 ### データセットを変えたときに直す場所
-- ONNX推論: 列名やカテゴリ列を変えたら `schema.yaml` を新データに合わせて更新し、モデルを再生成してください。推論時は `ModelRunner <model.onnx> <output-name> --csv <csv> <schema.yaml> [out.csv]` を使います。
-- PMML推論: 同様に `schema.yaml` を更新し、PMMLを新データで再生成してください。PMMLの `ModelRunner` は `--csv <csv> <schema.yaml>` を期待します。
+- ONNX推論: 列名やカテゴリ列を変えたら `schema_titanic.yaml` を新データに合わせて更新し、モデルを再生成してください。推論時は `ModelRunner <model.onnx> <output-name> --csv <csv> <schema.yaml> [out.csv]` を使います。
+- PMML推論: 同様に `schema_titanic.yaml` を更新し、PMMLを新データで再生成してください。PMMLの `ModelRunner` は `--csv <csv> <schema.yaml>` を期待します。
 - Python側: 新しいデータ用に `train_random_forest.py` を実行し、ONNX/PMMLを再出力。スキーマを使う場合は `schema.yaml` を更新してください。
 
 ## PMML Predictor
@@ -72,9 +82,42 @@ mvn package
 PMMLモデルを使って推論する例です。列定義はスキーマYAMLに従います。
 
 ```bash
-java -jar target/pmml-predictor-1.0.0.jar ../models/titanic_random_forest.pmml --csv ../data/Titanic-Dataset.csv ../schema.yaml ../models/pmml_predictions.csv
+java -jar target/pmml-predictor-1.0.0.jar ../models/titanic_random_forest.pmml --csv ../data/Titanic-Dataset.csv ../schema_titanic.yaml ../models/titanic_pmml_predictions.csv
 ```
 
 - `--csv` の後にCSVパス、その次にスキーマYAMLへのパスを指定します（学習時と同じもの）。
 - 最後の引数（出力CSV）は省略可。指定しない場合は標準出力のみ。
 - 実行結果として確率と推論時間が表示され、CSV出力にも推論時間が含まれます。
+
+
+# モデルの切り替え
+java -jar target/onnx-predictor-1.0.0.jar ../models/penguin_random_forest.onnx probabilities --csv ../data/penguins.csv ../schema_penguin.yaml ../models/penguin_onnx_predictions.csv
+
+
+java -cp target/onnx-predictor-1.0.0.jar \
+  /path/to/model1.onnx probabilities \
+  --csv /path/to/input.csv \
+  /path/to/schema.yaml \
+  /path/to/predictions.csv
+
+java -cp target/onnx-predictor-1.0.0.jar \
+  /path/to/model2.onnx probabilities \
+  --csv /path/to/input.csv \
+  /path/to/schema.yaml \
+  /path/to/predictions2.csv
+
+
+java -cp target/onnx-predictor-1.0.0.jar com.example.onnx.SchemaReloadExample \
+  ../models/titanic_random_forest.onnx \
+  ../models/titanic_random_forest_v2.onnx \
+  ../schema_titanic.yaml \
+  ../data/Titanic-Dataset.csv \
+  2 \
+  probabilities
+
+java -cp target/pmml-predictor-1.0.0.jar com.example.pmml.SchemaReloadExample \
+  ../models/titanic_random_forest.pmml \
+  ../models/titanic_random_forest_v2.pmml \
+  ../schema_titanic.yaml \
+  ../data/Titanic-Dataset.csv \
+  2

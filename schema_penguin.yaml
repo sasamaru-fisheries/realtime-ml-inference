@@ -1,0 +1,17 @@
+target: target
+numeric:
+- name: bill_length_mm
+  impute: median
+- name: bill_depth_mm
+  impute: median
+- name: flipper_length_mm
+  impute: median
+- name: body_mass_g
+  impute: median
+categorical:
+- name: island
+  impute: most_frequent
+  encode: onehot
+- name: sex
+  impute: most_frequent
+  encode: onehot

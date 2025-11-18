@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -119,6 +119,19 @@ def train_model(X: np.ndarray, y: np.ndarray, n_estimators: int, numeric_cols: l
     preds = clf.predict(X_test)
     acc = accuracy_score(y_test, preds)
     print(f"Validation accuracy: {acc:.3f}")
+    # ROC-AUC / PR-AUC（二値分類前提）
+    try:
+        proba = clf.predict_proba(X_test)
+        if proba.shape[1] == 2:
+            pos_proba = proba[:, 1]
+            roc = roc_auc_score(y_test, pos_proba)
+            pr = average_precision_score(y_test, pos_proba)
+            print(f"Validation ROC-AUC: {roc:.3f}")
+            print(f"Validation PR-AUC:  {pr:.3f}")
+        else:
+            print(f"predict_proba のクラス数が {proba.shape[1]} です。二値分類のみROC/PR-AUCを計算します。")
+    except Exception as ex:
+        print(f"ROC/PR-AUC計算に失敗しました: {ex}")
     return clf
 
 
