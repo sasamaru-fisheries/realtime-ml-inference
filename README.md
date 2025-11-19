@@ -121,3 +121,13 @@ java -cp target/pmml-predictor-1.0.0.jar com.example.pmml.SchemaReloadExample \
   ../schema_titanic.yaml \
   ../data/Titanic-Dataset.csv \
   2
+
+# LightGBMを使う場合
+### モデルの学習
+uv run python src/train_lightgbm.py --csv data/Titanic-Dataset.csv --schema schema_titanic.yaml --onnx models/titanic_lightgbm.onnx --pmml models/titanic_lightgbm.pmml
+
+### 推論
+java -jar target/onnx-predictor-1.0.0.jar ../models/titanic_lightgbm.onnx probabilities --csv ../data/Titanic-Dataset.csv ../schema_titanic.yaml ../models/titanic_lightgbm_predictions.csv
+
+
+java -jar target/pmml-predictor-1.0.0.jar ../models/titanic_lightgbm.pmml --csv ../data/Titanic-Dataset.csv ../schema_titanic.yaml ../models/titanic_lightgbm_predictions.csv
