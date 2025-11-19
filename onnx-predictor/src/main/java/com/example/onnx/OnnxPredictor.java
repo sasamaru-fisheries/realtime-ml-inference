@@ -22,20 +22,29 @@ import java.util.HashMap;
  */
 public class OnnxPredictor implements Closeable {
     private final OrtEnvironment environment;
-    private final Path modelPath;
+    private Path modelPath;
     private OrtSession session;
 
     public OnnxPredictor(String modelPath) throws IOException, OrtException {
-        // Pathオブジェクトに変換し、入力されたパスが正しいかを確認する
-        this.modelPath = Paths.get(modelPath);
-        // モデルファイルの存在を先に確認しておく
-        if (!Files.exists(this.modelPath)) {
-            throw new IOException("Model not found at: " + this.modelPath);
-        }
         // ONNX Runtimeのグローバル環境を取得（GPU/CPU管理などを担当）
         this.environment = OrtEnvironment.getEnvironment();
+        setModelPathInternal(Paths.get(modelPath));
         // セッションを生成して推論準備を整える
         loadSession();
+    }
+
+    /**
+     * 参照するONNXモデルファイルを変更する。reloadModel() を呼び出すことで新しいモデルをロードできる。
+     */
+    public synchronized void setModelPath(String newModelPath) throws IOException {
+        setModelPathInternal(Paths.get(newModelPath));
+    }
+
+    private void setModelPathInternal(Path newPath) throws IOException {
+        if (!Files.exists(newPath)) {
+            throw new IOException("Model not found at: " + newPath);
+        }
+        this.modelPath = newPath;
     }
 
     private synchronized void loadSession() throws OrtException {

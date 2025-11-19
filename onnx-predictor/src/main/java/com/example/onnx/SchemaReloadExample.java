@@ -31,6 +31,7 @@ public final class SchemaReloadExample {
                     """);
             System.exit(1);
         }
+        // モデル2つ・スキーマ・任意のCSV/出力名を取得
         String model1 = args[0];
         String model2 = args[1];
         String schemaPath = args[2];
@@ -38,24 +39,29 @@ public final class SchemaReloadExample {
         int rowIndex = args.length >= 5 ? Integer.parseInt(args[4]) : 1;
         String outputName = args.length >= 6 ? args[5] : "probabilities";
 
+        // スキーマをロードし、CSV指定があれば該当行、なければデフォルト値で入力マップを構築
         Schema schema = Schema.load(Path.of(schemaPath));
         Map<String, Object> input = csvPath != null
                 ? loadRowFromCsv(csvPath, schema, rowIndex)
                 : buildDefaultInputs(schema);
 
-        try (OnnxPredictor p1 = new OnnxPredictor(model1)) {
-            InferenceResult r1 = p1.runInference(input, outputName);
+        // 1つのPredictorインスタンスを再利用し、モデル1→モデル2へ差し替えて推論を実行
+        try (OnnxPredictor predictor = new OnnxPredictor(model1)) {
+            InferenceResult r1 = predictor.runInference(input, outputName);
             System.out.println("Model1 output: " + Arrays.toString(r1.output()));
             System.out.printf("Elapsed: %.3f ms%n", r1.elapsedMillis());
-        }
-        try (OnnxPredictor p2 = new OnnxPredictor(model2)) {
-            InferenceResult r2 = p2.runInference(input, outputName);
+
+            predictor.setModelPath(model2); // model2に差し替え
+            predictor.reloadModel();        // セッションを再構築
+
+            InferenceResult r2 = predictor.runInference(input, outputName);
             System.out.println("Model2 output: " + Arrays.toString(r2.output()));
             System.out.printf("Elapsed: %.3f ms%n", r2.elapsedMillis());
         }
     }
 
     private static Map<String, Object> buildDefaultInputs(Schema schema) {
+        // スキーマの列に合わせて0/空文字を仕込む
         Map<String, Object> map = new HashMap<>();
         for (String col : schema.numeric()) {
             map.put(col, new float[]{0f});
@@ -67,6 +73,7 @@ public final class SchemaReloadExample {
     }
 
     private static Map<String, Object> loadRowFromCsv(String csvPath, Schema schema, int rowIndex) throws IOException {
+        // CSVを全行読み込んで対象行を探す（簡易実装）
         List<String> lines = Files.readAllLines(Path.of(csvPath));
         if (lines.size() < 2) {
             throw new IllegalArgumentException("CSVが空かヘッダーのみです: " + csvPath);
