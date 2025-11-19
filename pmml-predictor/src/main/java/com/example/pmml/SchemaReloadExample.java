@@ -30,30 +30,36 @@ public final class SchemaReloadExample {
                     """);
             System.exit(1);
         }
+        // モデルファイル2つとスキーマ/CSV情報を取得
         String model1 = args[0];
         String model2 = args[1];
         String schemaPath = args[2];
         String csvPath = args.length >= 4 ? args[3] : null;
         int rowIndex = args.length >= 5 ? Integer.parseInt(args[4]) : 1;
 
+        // スキーマ定義から入力マップを生成（CSVが無ければ0/空文字を使用）
         Schema schema = Schema.load(Path.of(schemaPath));
         Map<String, Object> input = csvPath != null
                 ? loadRowFromCsv(csvPath, schema, rowIndex)
                 : buildDefaultInputs(schema);
 
-        try (PmmlPredictor p1 = new PmmlPredictor(model1)) {
-            InferenceResult r1 = p1.runInference(input);
+        // 1インスタンスでモデルを差し替えながら推論
+        try (PmmlPredictor predictor = new PmmlPredictor(model1)) {
+            InferenceResult r1 = predictor.runInference(input);
             System.out.println("Model1 probabilities: " + r1.probabilities());
             System.out.printf("Elapsed: %.3f ms%n", r1.elapsedMillis());
-        }
-        try (PmmlPredictor p2 = new PmmlPredictor(model2)) {
-            InferenceResult r2 = p2.runInference(input);
+
+            predictor.setModelPath(model2); // 2つ目のPMMLへ切り替え
+            predictor.reloadModel();        // Evaluatorを再読み込み
+
+            InferenceResult r2 = predictor.runInference(input);
             System.out.println("Model2 probabilities: " + r2.probabilities());
             System.out.printf("Elapsed: %.3f ms%n", r2.elapsedMillis());
         }
     }
 
     private static Map<String, Object> buildDefaultInputs(Schema schema) {
+        // 列ごとに0/空文字で埋める
         Map<String, Object> map = new HashMap<>();
         for (String col : schema.numeric()) {
             map.put(col, 0f);

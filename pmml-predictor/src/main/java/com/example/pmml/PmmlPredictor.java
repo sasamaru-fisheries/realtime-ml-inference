@@ -24,15 +24,26 @@ import java.util.Map;
  * PMMLモデルを読み込み、評価・再読み込みを行うヘルパークラス。
  */
 public class PmmlPredictor implements Closeable {
-    private final Path modelPath;
+    private Path modelPath;
     private Evaluator evaluator;
 
     public PmmlPredictor(String modelPath) throws IOException {
-        this.modelPath = Paths.get(modelPath);
-        if (!Files.exists(this.modelPath)) {
-            throw new IOException("PMML model not found at: " + this.modelPath);
-        }
+        setModelPathInternal(Paths.get(modelPath));
         loadEvaluator();
+    }
+
+    /**
+     * 使用するPMMLファイルを切り替える。reloadModel()で再読み込みしてください。
+     */
+    public synchronized void setModelPath(String newModelPath) throws IOException {
+        setModelPathInternal(Paths.get(newModelPath));
+    }
+
+    private void setModelPathInternal(Path newPath) throws IOException {
+        if (!Files.exists(newPath)) {
+            throw new IOException("PMML model not found at: " + newPath);
+        }
+        this.modelPath = newPath;
     }
 
     private synchronized void loadEvaluator() throws IOException {
