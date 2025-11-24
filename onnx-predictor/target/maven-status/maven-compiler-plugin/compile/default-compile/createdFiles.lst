@@ -1,8 +1,0 @@
-com/example/onnx/ModelRunner.class
-com/example/onnx/InferenceResult.class
-com/example/onnx/ModelRunner$Schema.class
-com/example/onnx/SampleUsage$Schema.class
-com/example/onnx/OnnxPredictor.class
-com/example/onnx/SampleUsage.class
-com/example/onnx/SchemaReloadExample.class
-com/example/onnx/SchemaReloadExample$Schema.class
